@@ -9,46 +9,47 @@ use clap::{App, Arg};
 
 fn search_replace(
     buf: &[u8],
-    outfile: &mut File,
-    search_pattern: &[u8],
-    replace_pattern: &[u8],
+    search: &[u8],
+    replace: &[u8],
+    mut output: File,
 ) -> Result<usize, std::io::Error> {
-    assert_eq!(search_pattern.len(), replace_pattern.len());
+    assert_eq!(search.len(), replace.len());
 
     let mut i = 0;
     let mut substitutions = 0;
 
     while i < buf.len() {
-        let search_pattern_end = i + search_pattern.len();
-        if search_pattern_end < buf.len() && &buf[i..search_pattern_end] == search_pattern {
-            outfile.write(replace_pattern)?;
-            i += search_pattern.len();
+        let search_end = i + search.len();
+        if search_end < buf.len() && &buf[i..search_end] == search {
+            output.write(replace)?;
+            i += search.len();
             substitutions += 1;
         } else {
-            outfile.write(&[buf[i]])?;
+            output.write(&[buf[i]])?;
             i += 1;
         }
     }
     Ok(substitutions)
 }
 
-fn run(input: &Path, output: &Path, search: &[u8], replace: &[u8]) -> Result<(), std::io::Error> {
-    let mut f = File::open(&input)?;
-    let mut buf: Vec<u8> = Vec::new();
+fn run(
+    input_path: &Path,
+    output_path: &Path,
+    search: &[u8],
+    replace: &[u8],
+) -> Result<usize, std::io::Error> {
+    let mut f = File::open(&input_path)?;
+    let mut buf = Vec::new();
+    let n: usize;
 
-    println!("Opening \"{}\"", input.display());
-
+    println!("Opening \"{}\"", input_path.display());
     f.read_to_end(&mut buf)?;
 
-    let mut out = File::create(output)?;
+    let out = File::create(output_path)?;
+    n = search_replace(&buf, search, replace, out)?;
 
-    match search_replace(&buf, &mut out, &search, &replace) {
-        Ok(o) => {
-            println!("Substituted {} occurences.", o);
-            Ok(())
-        },
-        Err(e) => Err(e)
-    }
+    println!("Substituted {} occurences.", n);
+    Ok(n)
 }
 
 fn main() {
@@ -73,14 +74,14 @@ fn main() {
                 .required(true),
         )
         .arg(
-            Arg::with_name("search_pattern")
+            Arg::with_name("search")
                 .short("s")
                 .required(true)
                 .help("The pattern that has to be replaced")
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("replace_pattern")
+            Arg::with_name("replace")
                 .short("r")
                 .required(true)
                 .takes_value(true)
@@ -90,8 +91,8 @@ fn main() {
 
     let input = Path::new(matches.value_of("input").unwrap());
     let output = Path::new(matches.value_of("output").unwrap());
-    let search = *hex_d_hex::dhex(&matches.value_of("search_pattern").unwrap());
-    let replace = *hex_d_hex::dhex(&matches.value_of("replace_pattern").unwrap());
+    let search = *hex_d_hex::dhex(&matches.value_of("search").unwrap());
+    let replace = *hex_d_hex::dhex(&matches.value_of("replace").unwrap());
 
     if search.len() != replace.len() {
         println!("Patterns must have same length!");
