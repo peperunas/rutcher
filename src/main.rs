@@ -5,19 +5,14 @@ use std::fs::File;
 use std::io::Read;
 use std::io::Write;
 use std::path::Path;
-use std::error::Error;
 use clap::{App, Arg};
-
-enum PatcherError {
-    OutputWriteError,
-}
 
 fn search_replace(
     buf: &[u8],
     outfile: &mut File,
     search_pattern: &[u8],
     replace_pattern: &[u8],
-) -> Result<usize, PatcherError> {
+) -> Result<usize, std::io::Error> {
     assert_eq!(search_pattern.len(), replace_pattern.len());
 
     let mut i = 0;
@@ -26,32 +21,39 @@ fn search_replace(
     while i < buf.len() {
         let search_pattern_end = i + search_pattern.len();
         if search_pattern_end < buf.len() && &buf[i..search_pattern_end] == search_pattern {
-            match outfile.write(replace_pattern) {
-                Ok(_o) => {}
-                Err(e) => {
-                    println!("Could not write to output! - {}", e);
-                    return Err(PatcherError::OutputWriteError);
-                }
-            }
+            outfile.write(replace_pattern)?;
             i += search_pattern.len();
             substitutions += 1;
         } else {
-            match outfile.write(&[buf[i]]) {
-                Ok(_) => {}
-                Err(e) => {
-                    println!("Could not write to output! - {}", e);
-                    return Err(PatcherError::OutputWriteError);
-                }
-            }
+            outfile.write(&[buf[i]])?;
             i += 1;
         }
     }
     Ok(substitutions)
 }
 
+fn run(input: &Path, output: &Path, search: &[u8], replace: &[u8]) -> Result<(), std::io::Error> {
+    let mut f = File::open(&input)?;
+    let mut buf: Vec<u8> = Vec::new();
+
+    println!("Opening \"{}\"", input.display());
+
+    f.read_to_end(&mut buf)?;
+
+    let mut out = File::create(output)?;
+
+    match search_replace(&buf, &mut out, &search, &replace) {
+        Ok(o) => {
+            println!("Substituted {} occurences.", o);
+            Ok(())
+        },
+        Err(e) => Err(e)
+    }
+}
+
 fn main() {
-    let matches = App::new("Rutcher")
-        .version("0.1.1")
+    let matches = App::new("rutcher")
+        .version("0.1.2")
         .author("Giulio \"peperunas\" De Pasquale, <me@giugl.io>")
         .about(
             "A simple program which searches for a pattern in a file and patches it with a new one",
@@ -86,42 +88,14 @@ fn main() {
         )
         .get_matches();
 
-    let path = Path::new(matches.value_of("input").unwrap());
-    let outpath = Path::new(matches.value_of("output").unwrap());
-    let search_pattern = *hex_d_hex::dhex(&matches.value_of("search_pattern").unwrap());
-    let replace_pattern = *hex_d_hex::dhex(&matches.value_of("replace_pattern").unwrap());
+    let input = Path::new(matches.value_of("input").unwrap());
+    let output = Path::new(matches.value_of("output").unwrap());
+    let search = *hex_d_hex::dhex(&matches.value_of("search_pattern").unwrap());
+    let replace = *hex_d_hex::dhex(&matches.value_of("replace_pattern").unwrap());
 
-    if search_pattern.len() != replace_pattern.len() {
+    if search.len() != replace.len() {
         println!("Patterns must have same length!");
         return;
     }
-
-    println!("Opening \"{}\"", path.display());
-    let mut f = match File::open(&path) {
-        Err(why) => panic!(
-            "Failed to open {}: {}",
-            path.display(),
-            Error::description(&why)
-        ),
-        Ok(f) => f,
-    };
-
-    let mut buf: Vec<u8> = Vec::new();
-
-    match f.read_to_end(&mut buf) {
-        Ok(_) => {}
-        Err(_e) => {
-            panic!("Could not read from file");
-        }
-    }
-
-    let mut out = match File::create(outpath) {
-        Ok(o) => o,
-        Err(e) => panic!("Could not create file! - {}", e),
-    };
-
-    match search_replace(&buf, &mut out, &search_pattern, &replace_pattern) {
-        Ok(o) => println!("Substituted {} occurences.", o),
-        Err(_) => {}
-    }
+    run(input, output, &search, &replace).unwrap();
 }
