@@ -7,3 +7,4 @@ repository = "https://github.com/peperunas/rutcher"
 
 [dependencies]
 hex_d_hex = "1.0.1"
+clap = "2"
