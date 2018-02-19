@@ -1,11 +1,12 @@
 extern crate clap;
 extern crate hex_d_hex;
+extern crate memmap;
 
 use std::fs::File;
-use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use clap::{App, Arg};
+use memmap::Mmap;
 
 fn search_replace(
     buf: &[u8],
@@ -38,12 +39,11 @@ fn run(
     search: &[u8],
     replace: &[u8],
 ) -> Result<usize, std::io::Error> {
-    let mut f = File::open(&input_path)?;
-    let mut buf = Vec::new();
+    let f = File::open(&input_path)?;
+    let buf = unsafe { Mmap::map(&f)?};
     let n: usize;
 
     println!("Opening \"{}\"", input_path.display());
-    f.read_to_end(&mut buf)?;
 
     let out = File::create(output_path)?;
     n = search_replace(&buf, search, replace, out)?;
@@ -54,7 +54,7 @@ fn run(
 
 fn main() {
     let matches = App::new("rutcher")
-        .version("0.1.2")
+        .version("0.1.3")
         .author("Giulio \"peperunas\" De Pasquale, <me@giugl.io>")
         .about(
             "A simple program which searches for a pattern in a file and patches it with a new one",
