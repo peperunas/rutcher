@@ -1,12 +1,30 @@
-extern crate clap;
 extern crate hex_d_hex;
 extern crate memmap;
+#[macro_use]
+extern crate structopt;
 
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
-use clap::{App, Arg};
+use std::path::{Path, PathBuf};
+use structopt::StructOpt;
 use memmap::Mmap;
+
+/// A simple program which searches for a pattern in a file and patches it with a new one
+#[derive(StructOpt, Debug)]
+struct Options {
+    /// Input file
+    #[structopt(parse(from_os_str))]
+    input_file: PathBuf,
+    /// Output file
+    #[structopt(parse(from_os_str))]
+    output_file: PathBuf,
+    /// Pattern to search for
+    #[structopt(short = "s", long = "pattern")]
+    pattern: String,
+    /// Replacement pattern
+    #[structopt(short = "r", long = "replacement")]
+    replacement: String,
+}
 
 fn search_replace(
     buf: &[u8],
@@ -39,64 +57,32 @@ fn run(
     search: &[u8],
     replace: &[u8],
 ) -> Result<usize, std::io::Error> {
-    let f = File::open(&input_path)?;
-    let buf = unsafe { Mmap::map(&f)?};
-    let n: usize;
+    println!(r#"Opening "{}""#, input_path.display());
 
-    println!("Opening \"{}\"", input_path.display());
+    let f = File::open(&input_path)?;
+    let buf = unsafe { Mmap::map(&f)? };
 
     let out = File::create(output_path)?;
-    n = search_replace(&buf, search, replace, out)?;
+    let n = search_replace(&buf, search, replace, out)?;
 
     println!("Substituted {} occurences.", n);
     Ok(n)
 }
 
 fn main() {
-    let matches = App::new("rutcher")
-        .version("0.1.3")
-        .author("Giulio \"peperunas\" De Pasquale, <me@giugl.io>")
-        .about(
-            "A simple program which searches for a pattern in a file and patches it with a new one",
-        )
-        .arg(
-            Arg::with_name("input")
-                .short("i")
-                .help("The file to patch")
-                .takes_value(true)
-                .required(true),
-        )
-        .arg(
-            Arg::with_name("output")
-                .short("o")
-                .help("The file saved as output")
-                .takes_value(true)
-                .required(true),
-        )
-        .arg(
-            Arg::with_name("search")
-                .short("s")
-                .required(true)
-                .help("The pattern that has to be replaced")
-                .takes_value(true),
-        )
-        .arg(
-            Arg::with_name("replace")
-                .short("r")
-                .required(true)
-                .takes_value(true)
-                .help("The new pattern to apply"),
-        )
-        .get_matches();
+    let options = Options::from_args();
 
-    let input = Path::new(matches.value_of("input").unwrap());
-    let output = Path::new(matches.value_of("output").unwrap());
-    let search = *hex_d_hex::dhex(&matches.value_of("search").unwrap());
-    let replace = *hex_d_hex::dhex(&matches.value_of("replace").unwrap());
-
-    if search.len() != replace.len() {
+    let pattern = hex_d_hex::dhex(&options.pattern);
+    let replacement = hex_d_hex::dhex(&options.replacement);
+    if pattern.len() != replacement.len() {
         println!("Patterns must have same length!");
         return;
     }
-    run(input, output, &search, &replace).unwrap();
+
+    run(
+        &options.input_file,
+        &options.output_file,
+        &pattern,
+        &replacement,
+    ).expect("IO error");
 }
