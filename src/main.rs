@@ -1,11 +1,13 @@
 extern crate hex_d_hex;
 extern crate memmap;
+extern crate regex;
 #[macro_use]
 extern crate structopt;
 
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use regex::bytes::Regex;
 use structopt::StructOpt;
 use memmap::Mmap;
 
@@ -26,28 +28,41 @@ struct Options {
     replacement: String,
 }
 
-fn search_replace(
+fn build_regex_helper(pattern: &[u8]) -> String {
+    let mut re = String::with_capacity(pattern.len() * 4 + 5);
+    re.push_str("(?-u)");
+    for b in pattern {
+        re.push_str(&format!("\\x{:02x}", b));
+    }
+    re
+}
+
+fn build_regex(pattern: &[u8]) -> Regex {
+    let re = build_regex_helper(pattern);
+
+    // Shouldn't panic if there's no bug in `build_regex_helper`
+    Regex::new(&re).expect("invalid regex")
+}
+
+fn search_replace<W: Write>(
     buf: &[u8],
     search: &[u8],
     replace: &[u8],
-    mut output: File,
+    mut output: W,
 ) -> Result<usize, std::io::Error> {
-    assert_eq!(search.len(), replace.len());
-
-    let mut i = 0;
+    let re = build_regex(search);
+    let mut last = 0;
     let mut substitutions = 0;
+    for cap in re.captures_iter(buf) {
+        let m = cap.get(0).unwrap();
+        output.write_all(&buf[last..m.start()])?;
+        output.write_all(replace)?;
+        last = m.end();
 
-    while i < buf.len() {
-        let search_end = i + search.len();
-        if search_end < buf.len() && &buf[i..search_end] == search {
-            output.write(replace)?;
-            i += search.len();
-            substitutions += 1;
-        } else {
-            output.write(&[buf[i]])?;
-            i += 1;
-        }
+        substitutions += 1;
     }
+    output.write_all(&buf[last..])?;
+
     Ok(substitutions)
 }
 
@@ -72,6 +87,7 @@ fn run(
 fn main() {
     let options = Options::from_args();
 
+    // This will be undone later
     let pattern = hex_d_hex::dhex(&options.pattern);
     let replacement = hex_d_hex::dhex(&options.replacement);
     if pattern.len() != replacement.len() {
@@ -85,4 +101,30 @@ fn main() {
         &pattern,
         &replacement,
     ).expect("IO error");
+}
+
+#[test]
+fn escape() {
+    assert_eq!(build_regex_helper(b""), r#"(?-u)"#);
+    assert_eq!(build_regex_helper(b"\xab\xcd\x01"), r#"(?-u)\xab\xcd\x01"#);
+}
+
+#[test]
+fn replacement() {
+    let test = |inp: &[u8], pat: &[u8], rep: &[u8], exp: &[u8], num| {
+        let mut buf = Vec::new();
+        assert_eq!(search_replace(inp, pat, rep, &mut buf).unwrap(), num);
+        assert_eq!(buf, exp);
+    };
+
+    test(b"", b"CD", b"cd", b"", 0);
+    test(b"aAa", b"A", b"d", b"ada", 1);
+    test(b"aAa", b"", b"d", b"dadAdad", 4);
+    test(b"CC", b"C", b"cc", b"cccc", 2);
+    test(b"CC", b"C", b"CC", b"CCCC", 2);
+    test(b"ABEF", b"CD", b"cd", b"ABEF", 0);
+    test(b"ABCDEF", b"CD", b"cd", b"ABcdEF", 1);
+    test(b"ABCDCDEF", b"CD", b"cd", b"ABcdcdEF", 2);
+    test(b"ABCDECDF", b"CD", b"cd", b"ABcdEcdF", 2);
+    test(b"ABCD", b"CD", b"cd", b"ABcd", 1);
 }
